@@ -1,0 +1,16 @@
+/**:
+  ros__parameters:
+    alr_id: 132
+    serial_device: ""
+    baud_rate: 115200
+    qos_depth: 100
+    qos_reliability: reliable
+    queue_size: 1024
+    line_limit: 512
+    reconnect_min: 0.5
+    reconnect_max: 10.0
+    stale_timeout: 10.0
+    raw_log: ""
+    raw_log_bytes: 5000000
+    raw_log_backups: 3
+    publish_batch: 100
