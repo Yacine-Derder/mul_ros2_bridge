@@ -25,15 +25,24 @@ from rosidl_runtime_py.convert import message_to_ordereddict
 def stop_process(process):
     if process is None or process.poll() is not None:
         return
-    os.killpg(process.pid,signal.SIGINT)
+    try:
+        os.killpg(process.pid,signal.SIGINT)
+    except ProcessLookupError:
+        return
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid,signal.SIGTERM)
+        try:
+            os.killpg(process.pid,signal.SIGTERM)
+        except ProcessLookupError:
+            return
         try:
             process.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid,signal.SIGKILL)
+            try:
+                os.killpg(process.pid,signal.SIGKILL)
+            except ProcessLookupError:
+                return
             process.wait(timeout=3)
 
 
@@ -80,7 +89,7 @@ def assess(counts, status, diagnostics, errors, min_messages, min_success, requi
     else:
         if not status.connected or status.stale:
             failures.append('final connection is disconnected/stale')
-        for key in ('malformed','oversized','queue_dropped','reporter_mismatches'):
+        for key in ('malformed','oversized','queue_dropped','reporter_mismatches','raw_log_errors'):
             if getattr(status,key):
                 failures.append(f'{key}={getattr(status,key)}')
     if not diagnostics:
@@ -93,12 +102,13 @@ def main(argv=None):
     ap.add_argument('--alr-id',type=int,choices=range(132,136),default=132)
     ap.add_argument('--device',help='prefer /dev/serial/by-id/...')
     ap.add_argument('--baud',type=int,default=115200)
-    ap.add_argument('--duration',type=float,default=60)
+    ap.add_argument('--duration',type=float,default=60.0)
     ap.add_argument('--min-messages',type=int,default=1)
     ap.add_argument('--min-success',type=int,default=1)
     ap.add_argument('--require-kinds',type=int,nargs='*',choices=[1,4],default=[])
-    ap.add_argument('--stale-timeout',type=float,default=10)
+    ap.add_argument('--stale-timeout',type=float,default=10.0)
     ap.add_argument('--rosbag',action='store_true')
+    ap.add_argument('--synthetic',action='store_true',help='offline PTY capture only; labels evidence as synthetic')
     ap.add_argument('--yes',action='store_true',help='confirm explicitly supplied device and baud noninteractively')
     ap.add_argument('--output',type=Path)
     args=ap.parse_args(argv)
@@ -122,10 +132,15 @@ def main(argv=None):
             ap.error('invalid device selection')
     if not Path(device).exists():
         ap.error('device does not exist')
+    if args.synthetic and (Path(device).resolve().parent != Path('/dev/pts') or not Path(device).resolve().name.isdigit()):
+        ap.error('--synthetic only permits a generated /dev/pts/N device')
     if not args.yes:
         value=input(f'Baud rate [{args.baud}]: ').strip()
         if value:
-            args.baud=int(value)
+            try:
+                args.baud=int(value)
+            except ValueError:
+                ap.error('baud must be an integer')
         if args.baud<=0:
             ap.error('baud must be positive')
         if input(f'Open {device} at {args.baud}, read ALR {args.alr_id} for {args.duration}s? [yes/NO]: ').strip().lower()!='yes':
@@ -189,11 +204,11 @@ def main(argv=None):
         node.create_subscription(DiagnosticArray,base+'/diagnostics',on_diag,100)
         metadata=dict(device=device,baud=args.baud,alr_id=args.alr_id,duration=args.duration,
                       domain=os.environ.get('ROS_DOMAIN_ID'),rmw=os.environ.get('RMW_IMPLEMENTATION'),
-                      started_utc=stamp,synthetic=False)
+                      started_utc=stamp,synthetic=args.synthetic)
         (out/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
         if args.rosbag:
             bag_log=(out/'rosbag.log').open('w');handles.append(bag_log)
-            bag=subprocess.Popen(['ros2','bag','record','-o',str(out/'bag'),base+'/ranges',base+'/connection',base+'/diagnostics'],
+            bag=subprocess.Popen(['ros2','bag','record','-o',str(out/'bag'),'--topics',base+'/ranges',base+'/connection',base+'/diagnostics'],
                 stdout=bag_log,stderr=subprocess.STDOUT,start_new_session=True)
             time.sleep(1)
             if bag.poll() is not None:
@@ -213,10 +228,10 @@ def main(argv=None):
                       args.min_success,args.require_kinds,bridge.poll() is None)
         if bag and bag.poll() is not None:
             errors.append('rosbag exited during capture')
-        summary=dict(result='FAIL' if errors else 'PASS',counts=dict(counts),errors=errors,
+        summary=dict(result='FAIL' if errors else 'PASS',synthetic=args.synthetic,counts=dict(counts),errors=errors,
                      diagnostics=diag_count[0],connection=message_to_ordereddict(last_status[0]) if last_status[0] else None,output=str(out))
     except (Exception,KeyboardInterrupt) as exc:
-        summary=dict(result='FAIL',counts=dict(counts),errors=[f'{type(exc).__name__}: {exc}'],output=str(out))
+        summary=dict(result='FAIL',synthetic=args.synthetic,counts=dict(counts),errors=[f'{type(exc).__name__}: {exc}'],output=str(out))
     finally:
         stop_process(bridge)
         stop_process(bag)

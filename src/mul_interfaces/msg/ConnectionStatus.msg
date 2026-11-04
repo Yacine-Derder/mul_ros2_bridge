@@ -15,6 +15,8 @@ uint64 unrelated
 uint64 oversized
 uint64 queue_dropped
 uint64 disconnects
+string raw_log_error
+uint64 raw_log_errors
 uint64 reporter_mismatches
 float64 seconds_since_byte
 float64 seconds_since_measurement

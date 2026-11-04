@@ -96,7 +96,7 @@ class Bridge(Node):
         status.seconds_since_measurement = now-s['last_measurement'] if s['last_measurement'] else -1.0
         status.stale = (not s['last_measurement'] or status.seconds_since_measurement > self.stale_timeout)
         for key in ('bytes_received','lines_received','measurements','malformed','unrelated',
-                    'oversized','queue_dropped','disconnects','reporter_mismatches'):
+                    'oversized','queue_dropped','disconnects','reporter_mismatches','raw_log_errors','raw_log_error'):
             setattr(status,key,s[key])
         self.status_pub.publish(status)
         d = DiagnosticStatus()
@@ -105,7 +105,7 @@ class Bridge(Node):
             d.level,d.message = DiagnosticStatus.ERROR,'Disconnected: '+s['error']
         elif status.stale:
             d.level,d.message = DiagnosticStatus.WARN,'Connected; no recent MR1 (rate/verbosity/plan unknown)'
-        elif s['queue_dropped'] or s['malformed'] or s['oversized'] or s['reporter_mismatches']:
+        elif s['raw_log_errors'] or s['queue_dropped'] or s['malformed'] or s['oversized'] or s['reporter_mismatches']:
             d.level,d.message = DiagnosticStatus.WARN,'Receiving; inspect cumulative error/drop/reporter counters'
         else:
             d.level,d.message = DiagnosticStatus.OK,'Receiving MR1'

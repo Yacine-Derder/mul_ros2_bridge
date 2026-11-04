@@ -115,3 +115,93 @@ def test_missing_device_shutdown_interrupts_backoff():
 def test_config_validation(kwargs):
     with pytest.raises(ValueError):
         SerialWorker(**({'host_id':132}|kwargs))
+
+
+def test_raw_log_disk_error_does_not_interrupt_measurements(tmp_path):
+    master,slave=pty.openpty()
+    worker=SerialWorker(132,os.ttyname(slave),raw_log=str(tmp_path/'raw.log'))
+    def disk_full(record):
+        raise OSError('disk full')
+    worker.raw_logger.handlers[0].emit=disk_full
+    try:
+        worker.start()
+        until(lambda: worker.snapshot()['connected'])
+        os.write(master,((GOOD+'\n')*3).encode())
+        until(lambda: worker.snapshot()['measurements']==3)
+        assert worker.snapshot()['raw_log_errors']==1
+        assert 'disk full' in worker.snapshot()['raw_log_error']
+        assert worker.snapshot()['connected'] and worker.queue.qsize()==3
+    finally:
+        worker.stop()
+        os.close(master)
+        os.close(slave)
+
+
+def test_queue_recovers_after_overflow_and_epochs_roll_over():
+    master,slave=pty.openpty()
+    worker=SerialWorker(132,os.ttyname(slave),queue_size=1)
+    try:
+        worker.start()
+        until(lambda: worker.snapshot()['connected'])
+        os.write(master,((GOOD+'\n')*2).encode())
+        until(lambda: worker.snapshot()['measurements']==2)
+        assert worker.queue.get()[3]==1
+        transition=GOOD.replace('c=644','c=0').replace('t=1FCB41C4A4','t=0000000000').replace('e=0000000000000008','e=0000000000000009').replace('p=617AE520','p=FFFFFFFF')
+        os.write(master,(transition+'\n').encode())
+        until(lambda: not worker.queue.empty())
+        m,_,_,seq=worker.queue.get()
+        assert m.cycle==0 and m.timestamp_dtu==0 and m.epoch==9 and m.plan_fingerprint==2**32-1
+        assert seq==3 and worker.snapshot()['queue_dropped']==1
+    finally:
+        worker.stop()
+        os.close(master)
+        os.close(slave)
+
+
+def test_open_failures_retry_and_queue_remains_bounded():
+    calls=[]
+    def denied(*args):
+        calls.append(time.monotonic())
+        raise PermissionError('denied')
+    worker=SerialWorker(132,'fake',factory=denied,reconnect_min=.02,reconnect_max=.04)
+    try:
+        worker.start()
+        until(lambda: len(calls)>=3)
+        assert worker.snapshot()['generation']==0
+        assert 'PermissionError' in worker.snapshot()['error']
+        assert calls[2]-calls[1]>=.035
+        assert worker.queue.empty()
+    finally:
+        worker.stop()
+
+
+def test_actual_pty_disconnect_and_replacement(tmp_path):
+    first_master,first_slave=pty.openpty()
+    second_master,second_slave=pty.openpty()
+    link=tmp_path/'simulated_serial'
+    link.symlink_to(os.ttyname(first_slave))
+    worker=SerialWorker(132,str(link),reconnect_min=.02,reconnect_max=.04)
+    try:
+        worker.start()
+        until(lambda: worker.snapshot()['connected'])
+        os.write(first_master,(GOOD+'\nMR1 partial').encode())
+        until(lambda: worker.queue.qsize()==1)
+        first=worker.queue.get()
+        os.close(first_master)
+        first_master=None
+        until(lambda: worker.snapshot()['disconnects']>=1 and not worker.snapshot()['connected'])
+        link.unlink()
+        link.symlink_to(os.ttyname(second_slave))
+        until(lambda: worker.snapshot()['connected'])
+        os.write(second_master,(GOOD+'\n').encode())
+        until(lambda: worker.queue.qsize()==1)
+        second=worker.queue.get()
+        assert first[0]==second[0] and second[2]>first[2]
+        assert worker.snapshot()['malformed']==0
+    finally:
+        worker.stop()
+        if first_master is not None:
+            os.close(first_master)
+        os.close(first_slave)
+        os.close(second_master)
+        os.close(second_slave)

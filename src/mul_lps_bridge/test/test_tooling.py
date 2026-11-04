@@ -60,3 +60,88 @@ def test_acceptance_help_only():
     # Never execute a capture. --help exits before serial selection/opening.
     result=subprocess.run([sys.executable,str(ROOT/'scripts'/'acceptance.py'),'--help'],capture_output=True,text=True,check=True)
     assert '--rosbag' in result.stdout and '--duration' in result.stdout
+
+
+@pytest.mark.parametrize('bag',[False,True])
+def test_synthetic_acceptance_end_to_end(bag,tmp_path):
+    """Run full evidence collector, explicitly PTY-only and synthetic labeled."""
+    import os
+    import pty
+    import time
+    import json
+    import signal
+    master,slave=pty.openpty()
+    process=None
+    output=tmp_path/'synthetic_evidence'
+    with (tmp_path/'collector.log').open('w+') as log:
+        try:
+            command=[sys.executable,str(ROOT/'scripts'/'acceptance.py'),
+                '--synthetic','--device',os.ttyname(slave),'--yes','--duration','3',
+                '--output',str(output)]
+            if bag:
+                command.append('--rosbag')
+            process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            end=time.monotonic()+20
+            failure=(Path(__file__).parent/'fixtures'/'reference.txt').read_text().splitlines()[2]
+            while process.poll() is None and time.monotonic()<end:
+                os.write(master,(GOOD+'\n'+failure+'\n').encode())
+                time.sleep(.05)
+            assert process.poll() is not None, 'synthetic collector hung'
+            log.flush()
+            assert process.returncode==0,(tmp_path/'collector.log').read_text()
+            summary=json.loads((output/'summary.json').read_text())
+            metadata=json.loads((output/'metadata.json').read_text())
+            assert summary['result']=='PASS' and summary['synthetic'] and metadata['synthetic']
+            assert summary['counts']['success']>0 and summary['counts']['failure']>0
+            assert summary['diagnostics']>0
+            assert (output/'raw.log').exists()
+            if bag:
+                assert (output/'bag'/'metadata.yaml').exists()
+            # Exclusive bridge handle was closed; can reopen the PTY after cleanup.
+            import serial
+            with serial.Serial(os.ttyname(slave),exclusive=True,timeout=.1):
+                pass
+        finally:
+            if process and process.poll() is None:
+                os.killpg(process.pid,signal.SIGKILL)
+                process.wait(timeout=5)
+            os.close(master)
+            os.close(slave)
+
+
+@pytest.mark.parametrize('interrupt',[False,True])
+def test_synthetic_acceptance_failure_and_interrupt_cleanup(interrupt,tmp_path):
+    import os
+    import pty
+    import time
+    import json
+    import signal
+    import serial
+    master,slave=pty.openpty()
+    process=None
+    output=tmp_path/'synthetic_failure_evidence'
+    try:
+        process=subprocess.Popen([sys.executable,str(ROOT/'scripts'/'acceptance.py'),
+            '--synthetic','--device',os.ttyname(slave),'--yes','--duration','2',
+            '--output',str(output)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+            text=True,start_new_session=True)
+        if interrupt:
+            end=time.monotonic()+5
+            while not (output/'bridge.log').exists() and time.monotonic()<end:
+                time.sleep(.01)
+            # This signal interrupts an active collector; it must stop its bridge.
+            time.sleep(.5)
+            process.send_signal(signal.SIGINT)
+        stdout,_=process.communicate(timeout=12)
+        assert process.returncode==1,stdout
+        summary=json.loads((output/'summary.json').read_text())
+        assert summary['result']=='FAIL' and summary['synthetic']
+        assert summary['errors']
+        with serial.Serial(os.ttyname(slave),exclusive=True,timeout=.1):
+            pass
+    finally:
+        if process and process.poll() is None:
+            os.killpg(process.pid,signal.SIGKILL)
+            process.wait(timeout=5)
+        os.close(master)
+        os.close(slave)

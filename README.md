@@ -13,6 +13,8 @@ cd /home/waverover/mul_ros2_ws
 ./scripts/build_and_test.sh
 ```
 
+Current local result: **72 offline tests passed, none failed or skipped; both packages build and install.**
+
 The build/test script installs into this workspace with colcon, sources Jazzy and the new overlay, and runs the offline tests on domain 212 with localhost discovery and Cyclone DDS. It opens only generated pseudo-terminals, never physical serial devices. It returns nonzero for build/test failures. No changes to shell startup, networking or WaveRover services are needed. Dependencies are declared in package manifests; `rosdep install --from-paths src --ignore-src -r -y --rosdistro jazzy` is an alternative dependency installation method on a ROS-configured host.
 
 ## First physical test: operator only
@@ -23,7 +25,7 @@ The build/test script installs into this workspace with colcon, sources Jazzy an
 
 Select the LPS by-id device, confirm baud (default 115200) and type `yes`. The script launches its own bridge in domain 42 by default, subscribes to typed ranges/status/diagnostics, saves JSONL and rotating raw-byte logs, checks every received measurement against its raw MR1 record, prints PASS/FAIL, and stops its own processes. Add `--rosbag` to record those three topics. `--output /absolute/new/directory`, `--min-messages N`, `--min-success N`, `--require-kinds 1 4`, `--stale-timeout SECONDS` and `--duration SECONDS` control capture and checks. Use `--help` for all options. Unattended use requires an explicit `--device /dev/serial/by-id/... --baud 115200 --yes`.
 
-PASS requires at least one message and one successful measurement by default, matching reporter/host identity, consistent parsed fields, no observed sequence gaps, no malformed/oversized/dropped records, current connection and diagnostics, and a running bridge through capture. Failed ranges are retained and allowed. FF is not required unless explicitly requested: the active plan may not schedule it. PASS confirms the serial/ROS path, not physical accuracy, all six geometry edges, clock synchronization or firmware RF reliability. Evidence defaults to ignored `evidence/`; do not commit logs. See [HANDOFF.md](docs/HANDOFF.md).
+PASS requires at least one message and one successful measurement by default, matching reporter/host identity, consistent parsed fields, no observed sequence gaps, no malformed/oversized/dropped records or raw-log write errors, current connection and diagnostics, and a running bridge through capture. Failed ranges are retained and allowed. FF is not required unless explicitly requested: the active plan may not schedule it. PASS confirms the serial/ROS path, not physical accuracy, all six geometry edges, clock synchronization or firmware RF reliability. Evidence defaults to ignored `evidence/`; do not commit logs. See [HANDOFF.md](docs/HANDOFF.md).
 
 ## Launch after hardware approval
 

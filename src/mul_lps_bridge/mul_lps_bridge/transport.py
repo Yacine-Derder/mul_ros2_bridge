@@ -13,6 +13,13 @@ import serial
 from .parser import parse
 
 
+class RawLogHandler(RotatingFileHandler):
+    def handleError(self, record):
+        # Logging normally swallows disk errors and floods stderr per chunk.
+        # Surface failure to the reader, which disables the optional sink only.
+        raise OSError('raw log write/rotation failed')
+
+
 class Framer:
     def __init__(self, limit=512):
         if limit < 128:
@@ -77,6 +84,8 @@ class Stats:
     queue_dropped: int = 0
     disconnects: int = 0
     reporter_mismatches: int = 0
+    raw_log_errors: int = 0
+    raw_log_error: str = ''
     last_byte: float = 0.0
     last_measurement: float = 0.0
 
@@ -105,7 +114,7 @@ class SerialWorker:
             path = Path(raw_log).expanduser()
             path.parent.mkdir(parents=True, exist_ok=True)
             self.raw_logger = logging.Logger('mul_raw')
-            handler = RotatingFileHandler(path, maxBytes=raw_log_bytes, backupCount=raw_log_backups)
+            handler = RawLogHandler(path, maxBytes=raw_log_bytes, backupCount=raw_log_backups)
             handler.setFormatter(logging.Formatter('%(message)s'))
             self.raw_logger.addHandler(handler)
 
@@ -152,7 +161,18 @@ class SerialWorker:
                     received_ns, mono = time.time_ns(), time.monotonic()
                     if self.raw_logger:
                         # Hex preserves arbitrary bytes, partial lines, and corruption.
-                        self.raw_logger.info(json.dumps(dict(capture_session=self.capture_session, received_ns=received_ns, generation=generation, data_hex=data.hex())))
+                        try:
+                            self.raw_logger.info(json.dumps(dict(capture_session=self.capture_session, received_ns=received_ns, generation=generation, data_hex=data.hex())))
+                        except OSError as exc:
+                            with self.lock:
+                                self.stats.raw_log_errors += 1
+                                self.stats.raw_log_error = str(exc)
+                            for handler in self.raw_logger.handlers:
+                                try:
+                                    handler.close()
+                                except OSError:
+                                    pass
+                            self.raw_logger = None  # continue serial publication
                     lines = framer.feed(data)
                     with self.lock:
                         self.stats.bytes_received += len(data)
