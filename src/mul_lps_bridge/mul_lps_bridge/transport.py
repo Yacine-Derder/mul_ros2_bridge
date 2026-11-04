@@ -8,6 +8,7 @@ from logging.handlers import RotatingFileHandler
 import queue
 import threading
 import time
+import uuid
 import serial
 from .parser import parse
 
@@ -84,12 +85,13 @@ class SerialWorker:
     def __init__(self, host_id, device='', baud=115200, queue_size=1024,
                  line_limit=512, reconnect_min=0.5, reconnect_max=10.0,
                  raw_log='', raw_log_bytes=5000000, raw_log_backups=3,
-                 factory=open_serial, selector=select_device):
+                 factory=open_serial, selector=select_device, capture_session=None):
         if not 0 <= host_id <= 254 or baud <= 0 or queue_size < 1 or reconnect_min <= 0 or reconnect_max < reconnect_min:
             raise ValueError('invalid worker configuration')
         if raw_log_bytes < 1024 or raw_log_backups < 1:
             raise ValueError('raw log must have bounded rotation')
         self.host_id, self.device, self.baud = host_id, device, baud
+        self.capture_session = capture_session or str(uuid.uuid4())
         self.queue = queue.Queue(maxsize=queue_size)
         self.line_limit = line_limit
         Framer(line_limit)  # validate before thread starts
@@ -150,7 +152,7 @@ class SerialWorker:
                     received_ns, mono = time.time_ns(), time.monotonic()
                     if self.raw_logger:
                         # Hex preserves arbitrary bytes, partial lines, and corruption.
-                        self.raw_logger.info(json.dumps(dict(received_ns=received_ns, generation=generation, data_hex=data.hex())))
+                        self.raw_logger.info(json.dumps(dict(capture_session=self.capture_session, received_ns=received_ns, generation=generation, data_hex=data.hex())))
                     lines = framer.feed(data)
                     with self.lock:
                         self.stats.bytes_received += len(data)
@@ -178,7 +180,7 @@ class SerialWorker:
                         except queue.Full:
                             with self.lock:
                                 self.stats.queue_dropped += 1
-            except (OSError, serial.SerialException) as exc:
+            except (OSError, serial.SerialException, ValueError) as exc:
                 with self.lock:
                     self.stats.error = f'{type(exc).__name__}: {exc}'
             finally:

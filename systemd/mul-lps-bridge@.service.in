@@ -1,0 +1,24 @@
+[Unit]
+Description=MUL LPS serial bridge for ALR %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=dialout
+WorkingDirectory=@WORKSPACE@
+Environment=ROS_DOMAIN_ID=42
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+EnvironmentFile=/etc/mul_lps_bridge/%i.env
+ExecStart=@WORKSPACE@/scripts/run_bridge.sh
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

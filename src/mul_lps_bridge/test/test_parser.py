@@ -59,3 +59,19 @@ def test_zero_max_and_failure():
     assert parse(fail).power_corrected is None
     with pytest.raises(ValueError):
         parse(fail+' mm=0')
+
+
+def test_deterministic_corruption_fuzz():
+    import random
+    rng=random.Random(42)
+    for _ in range(2000):
+        data=bytearray(GOOD.encode())
+        for _ in range(rng.randrange(1,5)):
+            data[rng.randrange(len(data))]=rng.randrange(256)
+        try:
+            result=parse(bytes(data))
+        except ValueError:
+            continue
+        if result is not None:
+            assert result.reporter in (result.initiator,result.responder)
+            assert 0<=result.timestamp_dtu<2**40

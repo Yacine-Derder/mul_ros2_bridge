@@ -3,6 +3,7 @@ import queue
 import time
 import uuid
 import rclpy
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from rcl_interfaces.msg import SetParametersResult
@@ -50,20 +51,23 @@ class Bridge(Node):
         self.stale_timeout, self.batch = p['stale_timeout'], p['publish_batch']
         qos = QoSProfile(depth=p['qos_depth'], reliability=(ReliabilityPolicy.RELIABLE
             if p['qos_reliability']=='reliable' else ReliabilityPolicy.BEST_EFFORT))
-        self.ranges = self.create_publisher(RangeMeasurement,'ranges',qos)
+        def topic(name):
+            return f'/uwb/alr_{self.host_id}/{name}' if self.get_namespace()=='/' else name
+        self.ranges = self.create_publisher(RangeMeasurement,topic('ranges'),qos)
         status_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        self.status_pub = self.create_publisher(ConnectionStatus,'connection',status_qos)
-        self.diag_pub = self.create_publisher(DiagnosticArray,'diagnostics',10)
+        self.status_pub = self.create_publisher(ConnectionStatus,topic('connection'),status_qos)
+        self.diag_pub = self.create_publisher(DiagnosticArray,topic('diagnostics'),10)
         self.worker = SerialWorker(self.host_id, p['serial_device'], p['baud_rate'],
             p['queue_size'],p['line_limit'],p['reconnect_min'],p['reconnect_max'],
-            p['raw_log'],p['raw_log_bytes'],p['raw_log_backups'])
+            p['raw_log'],p['raw_log_bytes'],p['raw_log_backups'],capture_session=self.session)
         self.baud = p['baud_rate']
         self.last_health = None
         self.started = time.monotonic()
         self.worker.start()
-        self.create_timer(0.01,self.drain)
-        self.create_timer(1.0,self.publish_status)
+        self.steady_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.create_timer(0.01,self.drain,clock=self.steady_clock)
+        self.create_timer(1.0,self.publish_status,clock=self.steady_clock)
 
     def _reject_updates(self, params):
         if any(p.name in DEFAULTS or p.name == 'use_sim_time' for p in params):

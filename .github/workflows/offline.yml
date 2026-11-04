@@ -1,0 +1,15 @@
+name: Offline ROS Jazzy tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3-colcon-common-extensions python3-pytest python3-serial python3-yaml ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-diagnostic-msgs
+      - name: Build and test using pseudo-terminals only
+        shell: bash
+        run: ./scripts/build_and_test.sh
