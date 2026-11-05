@@ -61,8 +61,9 @@ def select_device(configured=''):
 def open_serial(device, baud, timeout):
     port = serial.Serial(port=None, baudrate=baud, timeout=timeout,
                          write_timeout=timeout, exclusive=True)
-    # Set before open. The OS/USB driver may still change control lines on open.
-    port.dtr = False
+    # Bitcraze USB CDC gates telemetry on DTR; apply on every open/reconnect.
+    # RTS is unused; keep it disabled. No serial commands are transmitted.
+    port.dtr = True
     port.rts = False
     port.port = device
     port.open()

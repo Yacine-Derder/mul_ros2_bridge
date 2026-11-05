@@ -1,8 +1,10 @@
 import os
 import pty
 import time
+from unittest.mock import Mock
 import pytest
-from mul_lps_bridge.transport import Framer, SerialWorker, select_device
+import serial
+from mul_lps_bridge.transport import Framer, SerialWorker, open_serial, select_device
 from test_parser import GOOD
 
 
@@ -13,6 +15,95 @@ def until(predicate, seconds=3):
             return
         time.sleep(0.01)
     assert predicate()
+
+
+def cdc_factory(monkeypatch, chunks_by_connection):
+    """Real closed pyserial settings, mocked I/O; never opens any descriptor."""
+    constructor = serial.Serial
+    ports, settings_at_open = [], []
+
+    def create(**kwargs):
+        assert kwargs == dict(port=None, baudrate=115200, timeout=.1,
+                              write_timeout=.1, exclusive=True)
+        port = constructor(**kwargs)
+        # Start opposite to the required state so both assignments are tested.
+        port.dtr, port.rts = False, True
+        chunks = iter(chunks_by_connection[len(ports)])
+
+        def opened():
+            assert port.dtr is True and port.rts is False
+            assert port.port == '/mock/lps'
+            settings_at_open.append(port.get_settings())
+
+        def read(size):
+            assert size == 4096
+            assert port.dtr is True and port.rts is False
+            item = next(chunks, None)
+            if isinstance(item, Exception):
+                raise item
+            if item is None:
+                time.sleep(.01)
+                return b''  # pyserial read timeout, not a disconnect
+            return item
+
+        port.open = Mock(side_effect=opened)
+        port.read = Mock(side_effect=read)
+        port.write = Mock(side_effect=AssertionError('serial writes forbidden'))
+        port.close = Mock()
+        ports.append(port)
+        return port
+
+    monkeypatch.setattr('mul_lps_bridge.transport.serial.Serial', create)
+    return ports, settings_at_open
+
+
+def test_usb_cdc_control_lines_and_serial_settings_before_open(monkeypatch):
+    ports, settings = cdc_factory(monkeypatch, [[]])
+    port = open_serial('/mock/lps', 115200, .1)
+    try:
+        assert ports == [port]
+        port.open.assert_called_once_with()
+        assert settings == [dict(baudrate=115200, bytesize=serial.EIGHTBITS,
+                                 parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+                                 xonxoff=False, dsrdtr=False, rtscts=False,
+                                 timeout=.1, write_timeout=.1, inter_byte_timeout=None)]
+        assert port.exclusive is True
+        port.write.assert_not_called()
+    finally:
+        port.close()
+
+
+@pytest.mark.parametrize('alr', range(132, 136))
+def test_usb_cdc_handshake_reapplied_on_reconnect_read_only(monkeypatch, alr):
+    line = GOOD.replace('l=132', f'l={alr}')
+    if alr >= 134:
+        line = line.replace('i=132 j=133', f'i=133 j={alr}').replace('b=1', 'b=4')
+    encoded = (line+'\n').encode()
+    ports, settings = cdc_factory(monkeypatch, [
+        [b'USB startup\n', b'', encoded[:12], b'', encoded[12:],
+         b'MR1 partial', OSError('simulated unplug')],
+        [b'', encoded]])
+    worker = SerialWorker(alr, '/mock/lps', reconnect_min=.01, reconnect_max=.02)
+    try:
+        worker.start()
+        until(lambda: worker.queue.qsize() == 2)
+        stats = worker.snapshot()
+        assert stats['connected'] and stats['generation'] == 2
+        assert stats['disconnects'] == 1 and stats['error'] == ''
+        assert stats['measurements'] == 2 and stats['unrelated'] == 1
+        assert stats['malformed'] == stats['reporter_mismatches'] == 0
+        first, second = worker.queue.get_nowait(), worker.queue.get_nowait()
+        assert first[0] == second[0] and first[0].reporter == alr
+        assert (first[2], second[2]) == (1, 2)
+        assert (first[3], second[3]) == (1, 2)
+        assert len(settings) == 2 and settings[0] == settings[1]
+    finally:
+        worker.stop()
+    assert len(ports) == 2
+    for port in ports:
+        port.open.assert_called_once_with()
+        port.close.assert_called_once_with()
+        port.write.assert_not_called()
 
 
 def test_framer_bounded_recovery():

@@ -36,7 +36,7 @@ For 133–135 use their matching env/instance. The unit runs as the rendering us
 ## Debugging
 
 - No connection: inspect `/uwb/alr_ID/connection` last_error, device existence, permissions, ambiguous autodetection or another serial owner. Retry is automatic; there is no need to restart the robot stack.
-- Connected but stale: confirm firmware version/verbosity/plan and its expected emission patterns manually. Quiet can suppress success; older firmware/AR emits human text without MR1. Bridge never changes firmware to fix silence. An idle tty read is not an unplug event.
+- Connected but stale: use the corrected bridge, which asserts USB CDC DTR on every open/reconnect (RTS stays disabled). Bitcraze firmware gates telemetry on DTR, so older bridge revisions can receive startup lines but no MR1. Wait for any active recording to finish and release the port before a physical retest. If still stale, confirm firmware version/verbosity/plan and its expected emission patterns manually. Quiet can suppress success; older firmware/AR emits human text without MR1. Bridge never changes firmware to fix silence. An idle tty read is not an unplug event.
 - Malformed/oversized: enable `raw_log:=/absolute/writable/raw.log`, inspect hex chunks and pinned MR1 contract; verify baud and firmware generation. No log is automatically uploaded.
 - Reporter mismatch: validate USB board and host mapping; changing host identity does not change firmware reporter. Measurements remain published.
 - Queue drops: inspect CPU/storage/DDS subscriber pressure and increase bounded queue/depth or batch only with a measured reason. Raw logging can add storage load. Status measures parser traffic, not network delivery.
