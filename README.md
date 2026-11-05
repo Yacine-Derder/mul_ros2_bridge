@@ -13,7 +13,7 @@ cd /home/waverover/mul_ros2_ws
 ./scripts/build_and_test.sh
 ```
 
-Current local result: **77 offline tests passed, none failed or skipped; both packages build and install.**
+Current local result: **92 offline tests passed, none failed or skipped; both packages build and install.**
 
 The build/test script installs into this workspace with colcon, sources Jazzy and the new overlay, and runs the offline tests on domain 212 with localhost discovery and Cyclone DDS. It opens only generated pseudo-terminals, never physical serial devices. It returns nonzero for build/test failures. No changes to shell startup, networking or WaveRover services are needed. Dependencies are declared in package manifests; `rosdep install --from-paths src --ignore-src -r -y --rosdistro jazzy` is an alternative dependency installation method on a ROS-configured host.
 
@@ -38,7 +38,7 @@ ros2 launch mul_lps_bridge bridge.launch.py alr_id:=132 serial_device:=/dev/seri
 
 Substitute `alr_id:=133`, `134` or `135` on that host; no role setting or code change is needed when reference ownership changes. Default topics are `/uwb/alr_<ID>/ranges`, `/connection` and `/diagnostics` under the same prefix. Override `namespace:=/custom/prefix` if needed. `config:=/absolute/custom.yaml` selects a custom YAML; the selected launch ALR ID always overrides YAML identity. Without launch, `ros2 run mul_lps_bridge bridge --ros-args -p alr_id:=132` also uses the standard prefix. An explicit ROS namespace takes precedence.
 
-Empty `serial_device` auto-selects only when exactly one distinct `/dev/serial/by-id/*Bitcraze*` device exists. It retries when absent or ambiguous and never falls back to arbitrary ttyUSB/ttyACM devices. Stable device IDs are preferred; no board serial number is committed. Explicit paths support adapters and PTYs. The driver requests exclusive access, asserts DTR and disables RTS before every open, including automatic reconnects. Bitcraze USB CDC firmware uses DTR to recognize an active serial client and gate ongoing telemetry; RTS is unused and hardware flow control stays disabled. This handshake sends no serial commands. Actual USB/OS behavior still requires the physical retest. Stop other monitors first. Metadata-only `ls -l /dev/serial/by-id/` is safe for device discovery.
+Unset or empty `SERIAL_DEVICE` in `scripts/run_bridge.sh` omits the optional launch argument; `ALR_ID` remains required and `BAUD_RATE` defaults to 115200. Omitted `serial_device` auto-selects only when exactly one distinct `/dev/serial/by-id/*Bitcraze*` device exists. It retries when absent or ambiguous and never falls back to arbitrary ttyUSB/ttyACM devices. Stable device IDs are preferred; no board serial number is committed. Explicit paths support adapters and PTYs. The driver requests exclusive access, asserts DTR and disables RTS before every open, including automatic reconnects. Bitcraze USB CDC firmware uses DTR to recognize an active serial client and gate ongoing telemetry; RTS is unused and hardware flow control stays disabled. This handshake sends no serial commands. Actual USB/OS behavior must be verified on each host; ALR 132 passed the November 5 retest. Stop other monitors first. Metadata-only `ls -l /dev/serial/by-id/` is safe for device discovery.
 
 ```bash
 ros2 topic echo /uwb/alr_132/ranges
@@ -71,4 +71,4 @@ Parameters require restart; dynamic identity/transport changes are rejected. Raw
 
 ## Deployment and troubleshooting
 
-[DEPLOYMENT.md](docs/DEPLOYMENT.md) covers per-host installation, serial permissions, optional systemd activation, rollback and debugging. [TESTING.md](docs/TESTING.md) lists offline coverage and limits. [PROGRESS.md](docs/PROGRESS.md) records milestones. All live actions remain for the operator: no physical serial port has been opened, no firmware flashed, and no existing service enabled, disabled or restarted by this work.
+[DEPLOYMENT.md](docs/DEPLOYMENT.md) covers per-host installation, serial permissions, optional systemd activation, rollback and debugging. [TESTING.md](docs/TESTING.md) lists offline coverage and limits. [PROGRESS.md](docs/PROGRESS.md) records milestones. The November 5 deployment correction passed 92 offline tests and a 20-second physical ALR 132 acceptance capture (48 ranges) plus an empty-device launcher capture (47 ranges, no bridge errors, clean shutdown). This is foreground hardware validation, not systemd or reboot validation. System service installation requires operator sudo; remote hosts require trusted SSH access. See [DEPLOYMENT_STATUS.md](docs/DEPLOYMENT_STATUS.md) for the exact scope and remaining steps. No existing service or firmware configuration was changed.

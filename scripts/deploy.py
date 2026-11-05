@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Idempotently render deployment files; never install/enable/restart a service."""
 import argparse
-import getpass
 from pathlib import Path
 import re
 
 
 def render(root, output, alr, device='', baud=115200, user=None):
-    user=user or getpass.getuser()
+    user=user or 'waverover'
     if alr not in range(132,136) or baud<=0:
         raise ValueError('invalid ALR/baud')
     # EnvironmentFile is systemd syntax. Reject metacharacters rather than risk

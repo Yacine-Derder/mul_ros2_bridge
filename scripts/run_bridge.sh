@@ -6,5 +6,8 @@ source /opt/ros/jazzy/setup.bash
 source "$ROOT/install/setup.bash"
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
 export RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
-exec ros2 launch mul_lps_bridge bridge.launch.py "alr_id:=$ALR_ID" \
-  "serial_device:=${SERIAL_DEVICE:-}" "baud_rate:=${BAUD_RATE:-115200}"
+args=("alr_id:=$ALR_ID" "baud_rate:=${BAUD_RATE:-115200}")
+if [[ -n ${SERIAL_DEVICE:-} ]]; then
+  args+=("serial_device:=$SERIAL_DEVICE")
+fi
+exec ros2 launch mul_lps_bridge bridge.launch.py "${args[@]}"

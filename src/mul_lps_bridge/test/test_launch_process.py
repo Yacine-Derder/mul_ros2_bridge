@@ -9,6 +9,7 @@ import rclpy
 from mul_interfaces.msg import RangeMeasurement
 from test_parser import GOOD
 from test_ros import spin_until
+from test_tooling import ROOT
 
 
 @pytest.mark.parametrize('alr',range(132,136))
@@ -22,8 +23,8 @@ def test_installed_launch_process(alr,tmp_path):
             node=rclpy.create_node(f'offline_launch_observer_{alr}')
             received=[]
             node.create_subscription(RangeMeasurement,f'/uwb/alr_{alr}/ranges',received.append,10)
-            process=subprocess.Popen(['ros2','launch','mul_lps_bridge','bridge.launch.py',
-                f'alr_id:={alr}',f'serial_device:={os.ttyname(slave)}'],
+            process=subprocess.Popen([str(ROOT/'scripts/run_bridge.sh')],
+                env=dict(os.environ, ALR_ID=str(alr), SERIAL_DEVICE=os.ttyname(slave)),
                 stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             # Allow discovery, repeatedly feed synthetic traffic, then validate it.
             end=time.monotonic()+8
@@ -34,9 +35,10 @@ def test_installed_launch_process(alr,tmp_path):
             assert received, (tmp_path/'launch.log').read_text()
             assert received[0].host_alr_id==alr and received[0].reporter==132
             assert received[0].raw_record==GOOD
-            os.killpg(process.pid,signal.SIGINT)
+            process.send_signal(signal.SIGINT)
             process.wait(timeout=5)
             assert process.returncode==0, (tmp_path/'launch.log').read_text()
+            assert 'process has died' not in (tmp_path/'launch.log').read_text()
         finally:
             if process and process.poll() is None:
                 os.killpg(process.pid,signal.SIGKILL)

@@ -2,6 +2,7 @@
 Description=MUL LPS serial bridge for ALR %i
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -11,11 +12,19 @@ WorkingDirectory=@WORKSPACE@
 Environment=ROS_DOMAIN_ID=42
 Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+UnsetEnvironment=ROS_LOCALHOST_ONLY ROS_STATIC_PEERS
 EnvironmentFile=/etc/mul_lps_bridge/%i.env
-ExecStart=@WORKSPACE@/scripts/run_bridge.sh
-Restart=on-failure
+ExecStartPre=/usr/bin/test ${ALR_ID} = %i
+RuntimeDirectory=mul-lps-bridge
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/flock --nonblock --no-fork /run/mul-lps-bridge/serial.lock @WORKSPACE@/scripts/run_bridge.sh
+# ros2 launch may exit successfully after an unexpected child exit.
+# Explicit systemctl stop still suppresses automatic restart.
+Restart=always
 RestartSec=5
 KillSignal=SIGINT
+# Signal launch once; it forwards SIGINT to its bridge. Kill the group on timeout.
+KillMode=mixed
 TimeoutStopSec=20
 UMask=0077
 NoNewPrivileges=true
